@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'admin';
+    }
+
+    function isMutaxassis() {
+      return isAuthenticated() && getUserData().role == 'mutaxassis';
+    }
+
+    function isOqituvchi() {
+      return isAuthenticated() && getUserData().role == 'oqituvchi';
+    }
+
+    function isStaff() {
+      return isAdmin() || isMutaxassis() || isOqituvchi();
+    }
+
+    // =====================
+    // USERS COLLECTION
+    // =====================
+    match /users/{userId} {
+      // Users can read their own profile; admins can read all
+      allow read: if isOwner(userId) || isAdmin();
+
+      // Users can create their own profile on registration
+      allow create: if isOwner(userId) && request.resource.data.keys().hasAll(['email', 'displayName', 'role', 'createdAt']);
+
+      // Users can update their own non-role fields; admins can update anything
+      allow update: if (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status']))
+                    || isAdmin();
+
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+
+    // =====================
+    // THREATS COLLECTION
+    // =====================
+    match /threats/{threatId} {
+      // Users see their own threats; staff see all
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isStaff());
+
+      // Authenticated users can create threats
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.keys().hasAll(['userId', 'createdAt', 'riskScore']);
+
+      // Only owner or admin can update/delete
+      allow update: if resource.data.userId == request.auth.uid || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // =====================
+    // REPORTS COLLECTION
+    // =====================
+    match /reports/{reportId} {
+      // Users see their own; admins see all
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isStaff());
+
+      // Authenticated users can create reports
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.keys().hasAll(['title', 'description', 'severity', 'userId', 'createdAt']);
+
+      // Owner can update own report (not status); admins can update all fields
+      allow update: if (resource.data.userId == request.auth.uid
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'adminNote']))
+                    || isStaff();
+
+      allow delete: if isAdmin();
+    }
+
+    // =====================
+    // SCANS COLLECTION
+    // =====================
+    match /scans/{scanId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isStaff());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if resource.data.userId == request.auth.uid || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // =====================
+    // NOTIFICATIONS COLLECTION
+    // =====================
+    match /notifications/{notifId} {
+      // Users see their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated();
+      // Users can mark their own as read
+      allow update: if resource.data.userId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+      allow delete: if resource.data.userId == request.auth.uid || isAdmin();
+    }
+
+    // =====================
+    // LEARNING / PROGRESS COLLECTION
+    // =====================
+    match /learning/{progressId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isStaff());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // =====================
+    // CHAT HISTORY COLLECTION
+    // =====================
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if resource.data.userId == request.auth.uid;
+      allow delete: if resource.data.userId == request.auth.uid || isAdmin();
+    }
+
+    // =====================
+    // AUDIT LOGS (read-only for admins)
+    // =====================
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // =====================
+    // SETTINGS COLLECTION
+    // =====================
+    match /settings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

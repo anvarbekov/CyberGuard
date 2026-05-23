@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAuth() { return request.auth != null; }
+    function isOwner(uid) { return request.auth.uid == uid; }
+    function isImage() { return request.resource.contentType.matches('image/.*'); }
+    function isPDF() { return request.resource.contentType == 'application/pdf'; }
+    function isValidSize() { return request.resource.size < 10 * 1024 * 1024; }
+
+    // Avatars — user can upload their own
+    match /avatars/{userId}/{fileName} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId) && isImage() && request.resource.size < 3 * 1024 * 1024;
+      allow delete: if isOwner(userId);
+    }
+
+    // Report attachments — user can upload their own
+    match /reports/{userId}/{fileName} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId) && (isImage() || isPDF()) && isValidSize();
+      allow delete: if isOwner(userId);
+    }
+
+    // Catch-all for authenticated users (more permissive for development)
+    match /{allPaths=**} {
+      allow read, write: if isAuth() && isValidSize();
+    }
+  }
+}
